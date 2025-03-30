@@ -1,25 +1,37 @@
+version: '3.8'
+
 services:
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-
     ports:
-      - 8080:80
+      - 3000:3000
     volumes:
       - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://backend:8000
     depends_on:
       - backend
+    networks:
+      - app-network
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-
     ports:
       - 8000:8000
-
     volumes:
       - ./backend:/app
-    depends_on:
-      - frontend
+      - /app/.venv
+    environment:
+      - DATABASE_URL=sqlite:///./todo.db
+      - CORS_ORIGINS=http://localhost:3000,http://frontend:3000
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

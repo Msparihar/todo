@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getTodosByProject, Todo, updateTodo, deleteTodo, TodoStatus, TodoPriority } from '../../lib/api/todos';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Checkbox } from '../ui/checkbox';
+import { Input } from '../ui/input';
 
 interface TodoListProps {
   projectId: string;
@@ -15,6 +16,10 @@ const TodoList: React.FC<TodoListProps> = ({ projectId, onAddTodo }) => {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<TodoStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<TodoPriority | 'all'>('all');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchTodos = async () => {
     setIsLoading(true);
@@ -47,8 +52,9 @@ const TodoList: React.FC<TodoListProps> = ({ projectId, onAddTodo }) => {
         is_completed: !todo.is_completed,
       });
       setTodos(todos.map((t) => (t.id === todo.id ? updatedTodo : t)));
-    } catch (error) {
+    } catch (err) {
       setError('Failed to update todo');
+      console.error('Error updating todo:', err);
     }
   };
 
@@ -56,10 +62,75 @@ const TodoList: React.FC<TodoListProps> = ({ projectId, onAddTodo }) => {
     try {
       await deleteTodo(id);
       setTodos(todos.filter((todo) => todo.id !== id));
-    } catch (error) {
+    } catch (err) {
       setError('Failed to delete todo');
+      console.error('Error deleting todo:', err);
     }
   };
+
+  const handleEditStart = (todo: Todo) => {
+    setEditingId(todo.id);
+    setEditingTitle(todo.title);
+    // Focus the input on the next render
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const handleEditCancel = () => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+    setEditingId(null);
+  };
+
+  const updateTodoTitle = useCallback(async (id: string, title: string) => {
+    try {
+      const updatedTodo = await updateTodo(id, { title });
+      setTodos(todos.map((t) => (t.id === id ? updatedTodo : t)));
+    } catch (err) {
+      console.error('Error updating todo title:', err);
+      setError('Failed to update todo title');
+    }
+  }, [todos]);
+
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTitle = e.target.value;
+    setEditingTitle(newTitle);
+
+    if (editingId) {
+      // Clear any existing timeouts
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+
+      // Set a new timeout for debouncing
+      updateTimeoutRef.current = setTimeout(() => {
+        updateTodoTitle(editingId, newTitle);
+      }, 1000);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      handleEditCancel();
+    } else if (e.key === 'Enter') {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTodoTitle(editingId!, editingTitle);
+      }
+      setEditingId(null);
+    }
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Filter todos based on selected filters
   const filteredTodos = todos.filter(todo => {
@@ -204,13 +275,25 @@ const TodoList: React.FC<TodoListProps> = ({ projectId, onAddTodo }) => {
                       </div>
                       <div className="flex-grow">
                         <div className="flex items-center gap-2 mb-1">
-                          <p
-                            className={`font-medium ${
-                              todo.is_completed ? 'line-through text-gray-500' : ''
-                            }`}
-                          >
-                            {todo.title}
-                          </p>
+                          {editingId === todo.id ? (
+                            <Input
+                              ref={inputRef}
+                              value={editingTitle}
+                              onChange={handleTitleChange}
+                              onBlur={() => setEditingId(null)}
+                              onKeyDown={handleKeyDown}
+                              className="py-0 h-7"
+                            />
+                          ) : (
+                            <p
+                              className={`font-medium ${
+                                todo.is_completed ? 'line-through text-gray-500' : ''
+                              } cursor-pointer`}
+                              onClick={() => handleEditStart(todo)}
+                            >
+                              {todo.title}
+                            </p>
+                          )}
                           <div
                             className="inline-block w-3 h-3 rounded-full"
                             style={{ backgroundColor: priorityDetails.color }}
